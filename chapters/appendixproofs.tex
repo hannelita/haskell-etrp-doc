@@ -1,0 +1,26 @@
+\chapter{Types and Proofs}
+\label{sec:proofs}
+
+A type system is a tool for reasoning about programs. When built using the appropriate logic system, it can avoid paradoxes such as Russel's paradox (\ref{sec:logic}). Type systems help to eliminate run-time errors, by catching inconsistencies (paradoxes) in compile time. In order to analyse functions at this level, it is necessary to see programs as proofs. This Appendix will briefly explore the duality between propositions and types, proofs and elements. A proof of a proposition T is isomorphic to the type T. "a proof by induction is nothing other than a proof object defined using recursion" \cite{thompson1991type}. A program then becomes a set of terms built by the elements in a certain grammar. From there, it is possible to derive the necessary inference rules. It is with the aid of $\lambda$-calculus that the syntax of the language is analysed and transformed into an abstract syntax tree (AST).
+
+This process of formalizing types is detailed described in \cite{pierce2002types}. As an example, the (simply-typed) $\lambda$-Calculus over the type Bool if described as \ref{boolsimplytyped}.
+
+\begin{subequations}\label{boolsimplytyped}
+\begin{equation}
+    T ::= 
+\end{equation}
+\begin{equation}
+    Bool
+\end{equation}
+\begin{equation}
+    T \rightarrow T
+\end{equation}
+\end{subequations}
+
+This process is extended to all of the base types in the language (such as Integer, Float, Char, etc), as well as collections (Lists, Tuples, etc). Impure functions and exceptions also have corresponding types. The relation between types is also analysed, such as subtyping and polymorphism.
+
+This appendix could bring an extensive buzzword list (recursive types, equi-recursive types, type reconstruction, Universal types, existential types, higher order polymorphism, dependent types). Explaining these concepts in detail is out of the scope of this work, but asking which system would best describe (in terms of paradox-free and expressiveness) the implemented software is a pertinent question. A wider comparison between implementations using the formalism of type theory is a future work. To conclude this brief appendix, it is possible to quote \cite{thompson1991type}: "There is still much to be done in making type theory a usable and attractive system which supports programming in the large, but I am certain that languages based on type theory will be as popular in a few years as contemporary functional languages".
+
+
+
+

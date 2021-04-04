@@ -1,0 +1,1 @@
+Short version of my master Thesis - 2019 - Electrical Engineering department.

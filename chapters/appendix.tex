@@ -1,0 +1,75 @@
+\chapter{Lambda Calculus And History of Functional Programming}
+\label{sec:lc}
+
+\section{Lambda Calculus basics}
+\label{sec:apdxbasicsls}
+
+The roots of functional programming are strictly connected with mathematical logic (see Appendix \ref{sec:logic} for more information). The formalisation of the predicate calculus allowed functions to generalize operations since this type of logic allowed non-logical values (like numbers or strings) in its predicates. Quantifiers ($ \exists $ and $ \forall $) granted the analysis of sequences, essential for the formalisation of lists and other functional data structures (see \cite{okasaki1999purely}). With the advances in number theory (especially the ones proposed by G. Peano), it was possible to see the relationship between induction and recursion. As \cite{michaelson2011introduction} describes in his work, Russel and Withehead, then Hilbert, then G\"{o}del pushed logics and mathematical foundations forward, giving the first steps to the \textbf{theory of computability}.
+
+Three distinct formal approaches to the theory of computability were proposed in the 1930s: \textit{Turing machines}, by A. Turing (see \cite{boolos2002computability} for further details), \textit{recursive function theory}, by S. Kleene and the \textit{Lambda calculus} (or $ \lambda$-calculus), by A. Church. All these three approaches are equivalent to each other. They are all able to generalise von Neumann's machines (digital computers). Turing machines are based on assignments and time-ordered evaluation. The other techniques treat computations as structured function application. 
+
+In the 1960s, the LISP language is created, inspired by the $\lambda$ calculus. Even though LISP is a straightforward language, it built up the idea of translating high-level functional languages (such as Haskell) in a notation equally simple, based on the lambda-calculus \cite{peyton1987implementation}. The $\lambda$ calculus is based on function abstractions (which generalise expressions) and on function application (which perform the evaluation of the expressions). The name "calculus" is not in vain - it has properties and rules to describe programming languages. The abstraction of $\lambda$ can "be treated as a universal machine code for programming languages" \cite{michaelson2011introduction}. \ref{apdx:lambdaexpr} brings an example of the notation in the $\lambda$ calculus.
+
+\begin{lstlisting}[caption={Lambda abstraction}, captionpos=b, mathescape=true, label={apdx:lambdaexpr}]
+  ( $\lambda$ x . + x 1)
+\end{lstlisting}
+
+In \ref{apdx:lambdaexpr}, the $\lambda$ indicates a function, with one variable (\lstinline!x!), just as the mathematical expression $f(x)$ represents a single-variable function. The dot \lstinline!.! represents the beginning of the body of the function, just as the $=$ in maths. Then an expression in prefix form (operator, operands) shows up; in this case, \lstinline!+ x 1!, meaning that this function adds one to the variable \lstinline!x!. \lstinline!x! is called \textbf{bound variable}; it works like a place-holder and will be replaced by an argument when this expression is evaluated. In \cref{apdx:freeboundvar}, $4$ is the argument. It is also possible to see another component, \lstinline!y!, which is called \textbf{free variable}.
+
+\begin{lstlisting}[caption={Free variable: y; Bound Variable: x}, captionpos=b, mathescape=true, label={apdx:freeboundvar}]
+  ( $\lambda$ x . + x y) 4
+\end{lstlisting}
+
+\textbf{Beta-reduction} (Or $\beta$-reduction) is the operation of applying an argument to an expression (\ref{apdx:betareduction}).
+
+\begin{lstlisting}[caption={Beta reduction}, captionpos=b, mathescape=true, label={apdx:betareduction}]
+  ( $\lambda$ x . + x 1) 4 $\rightarrow $ (+ 4 1)
+\end{lstlisting}
+
+The $\beta$-reduction can be used "backwards", composing a $\beta$-abstraction \ref{apdx:betaabstraction}. The set of $\beta$ reduction/abstraction is know as $\beta$-conversion.
+
+\begin{lstlisting}[caption={Beta abstraction}, captionpos=b, mathescape=true, label={apdx:betaabstraction}]
+  (+ 4 1) $\leftarrow $  ( $\lambda$ x . + x 1) 4 
+\end{lstlisting}
+
+Intuitively, there is also an $\alpha$-conversion. This operation refers to variable name substitution, keeping the operations equivalent \ref{apdx:alphaconversion}.
+
+\begin{lstlisting}[caption={Alpha conversion}, captionpos=b, mathescape=true, label={apdx:alphaconversion}]
+  ( $\lambda$ x . + x 1) $\longleftrightarrow_{ \alpha }$ ( $\lambda$ y . + y 1) 
+\end{lstlisting}
+
+Expressions can behave equivalently with slightly different bodies when applied to the same arguments. The Eta-conversion (or $\eta$-conversion) is the rule describing this scenario \ref{apdx:etaconversion}.
+
+\begin{lstlisting}[caption={Eta conversion}, captionpos=b, mathescape=true, label={apdx:etaconversion}]
+  ( $\lambda$ x . + x 1) $\longleftrightarrow_{ \eta }$ ( + 1) 
+\end{lstlisting}
+
+There are other rules, but this Appendix will be restricted to these three, which are the most essential for the $\lambda$-calculus. After applying these rules, if an expression does not contain any other sub-expressions to be reduced, this expression is in the \textbf{Normal Form}, or NF, for short. There are several strategies to reduce an expression. Only some paths lead to normal form. A guaranteed strategy to reach the NF of an expression of the \textbf{Normal Order Reduction}. It specifies that "the leftmost, outermost redex should be reduced first" \cite{peyton1987implementation}. An outermost evaluation may require extra steps, but it will terminate if there is any path that leads the program to terminate.
+
+There are multiple ways to analyse a function in terms of its semantics, listed in \ref{apdx:semantics} \cite{pierce2002types}.
+
+\begin{enumerate}\label{apdx:semantics}
+  \item Interpreting the function as a sequence of operations in time, analysing it under operational aspects. This is a 'dynamic' view of the function, called \textbf{operational semantics}. This type of semantics specifies an abstract machine. A state relates to a term, and a behaviour relates to the transition function.
+  \item Interpret the function 'statically' as a set of arguments and values to be determined. This is called \textbf{Denotational semantics}. The meaning of a term is a mathematical object. It assigns a value to every expression in the language.
+  \item \textbf{Axiomatic semantics} states that the meaning of a term is what can be proved about it.
+\end{enumerate} 
+
+The $\lambda$-calculus can be taken into operational and denotational definitions. Denotational semantics is essential because it allows reasoning about the termination of evaluation (formally represented by $ \perp $).
+
+When a function needs the value of its argument, it is said to be \textit{strict}. The opposite, the function that does not request the value of its arguments, is called \textit{lazy}.
+
+Lambda-Calculus is a vast topic and its content is much more extensive than the ones listed in \ref{sec:apdxbasicsls}. See \cite{barendregt2013lambda} and \cite{hindley2008lambda} for further references. 
+
+\section{Translating programs into Lambda Calculus}
+
+In section \ref{sec:apdxbasicsls}, the basic tools and principles of Lambda Calculus were presented in a summarised format. It is possible to translate codes written using the functional paradigm into Lambda-calculus. This is the first step to analyse code under a mathematical aspect. \cite{peyton1987implementation} suggests two approaches for the translation:
+
+\begin{enumerate}
+\item Perform successive transformations from one functional program to another, with a simplification in each step. The final simplified version of each function could, in theory, be translated to pure Lambda-Calculus. This approach focuses on syntax
+\item Start by translating the program into an 'enriched' version of the Lambda-Calculus (a version of $\lambda$-calculus that includes the original one and additional features). From this enriched version, perform simplifications until reaching the simple version of the $\lambda$-calculus. This approach focuses on semantics.
+\end{enumerate}
+
+This work will not describe these techniques in-depth, nor implement such translation.
+
+
+

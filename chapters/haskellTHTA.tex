@@ -1,0 +1,910 @@
+\chapter{ Haskell in Electromagnetic Transient Analysis - Implementation}
+\label{implhs}
+
+This chapter describes the development of the principal analysis tool for this work: a functional version of the original ETR-P software rewritten in Haskell. The upcoming sections do not follow the same order of content creation; instead, they try to build a more intuitive connection between the theory of functional programming and a practical aspect of its application when building a program for electromagnetic transient analysis. Each section methodically follows the same basic structure:
+
+\begin{itemize}
+\item Logical explanation of the electrical process
+\item Haskell implementation
+\item Functional programming resources
+\item Comparison with the implementation in ETR-P using Matlab/Octave. Additional languages, such as Python and C++, will also be targeted for contrasting the different paradigms.
+\item Improvements and future work
+\end{itemize}
+
+
+\section{ The goals for a Haskell version of ETR-P }
+\label{haskellgoal}
+
+The main goal of this open-source Haskell program is to compare the style differences between functional and imperative code. This version does not contain all the features supported at the original ETR-P. Its scope was limited in order to demonstrate a proof of concept. Non-linear components, switches, transmission lines are not implemented. Triangular voltage sources and external current sources were put aside for the initial implementation. RLC components, DC and sinusoidal elements are the core of this Haskell program. It is restricted to single-phase circuits.
+
+Optimisation, performance, graphics, UI, charts and user input are popular topics in program development, but they are not the goal of this work either. This project is a comparison of programming paradigms and an analysis of the outcomes. 
+
+Following H. W. Dommel's original proposition in \cite{dommel1969digital}, this program reads in the circuit data, creates the initial steady-state matrix equations for initialization of equivalent historic sources of digital lumped components. Then it solves the nodal equations $ [G] [V] = [I_h] $ for every time step (where $ G $ is the conductances matrix, and $ I_h $ are the historical and external current sources), obtaining the final values for nodal voltages, branch voltages and branch currents after the simulation time. Translating this goal to Haskell, it is necessary to elaborate a function with the type described in \cref{lst:mainfnsig}. It follows the functional programming principle that says "Programs in Haskell can be viewed as functions whose input is that of the problem being solved, and whose output is the desired result.[...] The behaviour of the function can be understood as [..] computation by calculation". \cite{hudak2000haskell}
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={ETR-P Haskell goal's function}, captionpos=b, label={lst:mainfnsig}]
+thtaSimulation :: Vector ComponentData -> SimulationData -> SimulationResults
+\end{lstlisting}
+
+In \cref{lst:mainfn}, the function \textbf{thtaSimulation} receives two parameters: the components representing the circuit (\textbf{Vector ComponentData}) and the simulation data (\textbf{SimulationData}). It returns a tuple with a the final current vector and the final voltage matrix, represented by the type \textbf{SimulationResults}.
+
+In ETR-P (Matlab/Octave), there is no single function isolating this compact representation. Instead, there is a single block of code sequentially declaring the steps of the algorithm.
+
+The following section \ref{haskellimpl} will describe data acquisition from a set of files.
+
+\subsection{ Data input }
+\label{haskellimpl}
+
+The data describing the simulation parameters and the components of the circuit is stored in external files. This part of the code must handle the data and feed the algorithm with the collected information.  Just like the implementation of ETR-Py, this the initial circuit status will be stored in \lstinline!.csv! files. ETR-P (Matlab/Octave) uses a \lstinline!.txt! file.  
+
+The Haskell implementation requires two different files (one for components and another for the simulation parameters). A well-formed CSV does not mix different sources of information, making it inappropriate to store the Time and other information of the simulation along with the components and nodes information. The original ETR-P and also ETR-Py handle this step improperly mixing these two sources of information in the same input file.
+
+Listing \ref{csgetinfo1} and \cref{csgetinfo2} are examples of the input data split in two files.
+
+\begin{lstlisting}[language=bash, label=csgetinfo1, caption={Input data file for components}, captionpos=b]
+Element Type,Node K,Node M,Value,Source param 1,Source param 2,Plot
+EDC,2,0,10,0,0,0 
+R,2,1,10,0,0,0
+L,1,0,1,0,0,0
+\end{lstlisting}
+
+
+\begin{lstlisting}[language=bash, label=csgetinfo2, caption={Input data file for time and simulation data}, captionpos=b]
+Number of Nodes,Number of Voltages Sources,Step Size,Maximum time for simulation
+2,1,0.0001,0.05
+\end{lstlisting}
+
+Listing \ref{csgetinfoorig1} shows the input file format of the original ETR-P Matlab program:
+
+\begin{lstlisting}[language=bash, label=csgetinfoorig1, caption={Original input data file for ETR-P Matlab}, captionpos=b]
+T   2   1   100E-6  50E-3    0   0   0   0   0
+EDC 2   0   10      0       0   0   0   0   5
+R   2   1   10      0       0   0   0   0   5
+L   1   0   1       0       0   0   0   0   5
+NV  1   2   0       0       0   0   0   0   0
+\end{lstlisting}
+
+
+Headers were also inserted on each CSV file to make their columns self-explanatory (\cref{csgetinfo1} and \cref{csgetinfo2}). These headers are taken into consideration when parsing the files in the Haskell implementation.
+
+
+File operations are considered impure (details in \cref{sideeffects}), given that they can generate several unexpected behaviours to a function. Some of the possible are listed below:
+
+\begin{enumerate}\label{impureprobl1}
+  \item File path is incorrect;
+  \item File is corrupted;
+  \item File is in the wrong format (not a CSV);
+  \item A well-formed CSV is expected to have data in all the columns, for all the rows. The file might contain missing data;
+  \item File is in a different encoding (example: file contains characters from a different alphabet rather than the Latin alphabet);
+\end{enumerate}
+
+As described in \cref{sideeffects}, it will be necessary to use Haskell's specific mechanisms to deal with possible side effects. 
+
+The first step is building a parser to take the \lstinline!.csv! file and turn it into proper types. The implementation in this work uses the library \textbf{cassava} for handling the parsing. The implementation starts with the \lstinline!components.csv! file, describing each component and their corresponding position in the circuit (see \cref{lst:csv1}).
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Initial implementation of CSV file parsing with cassava}, captionpos=b, label={lst:csv1}]
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+
+module Main where
+
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.Vector as V
+-- from cassava
+import Data.Csv
+
+type ComponentData = (BL.ByteString, Int, Int, Float, Param, Param, Int)
+
+main :: IO ()
+main = do
+  csvData <- BL.readFile "data/components.csv"
+  let v = decode NoHeader csvData :: Either String (V.Vector ComponentData)
+
+\end{lstlisting}
+
+The code at \cref{lst:csv1} imports the basic modules (from lines 6 to 9), followed by a basic \textbf{type} declaration: \lstinline!ComponentData!. It matches the structure of each line of the CSV file \textit{components.csv}. \lstinline!ComponentData! is just a synonym to a tuple structure made of \lstinline!(BL.ByteString, Int, Int, Float, Param, Param, Int)!. Next, in the main body, the file is read with \lstinline!BL.readFile! and its content is decoded, ignoring the CSV header. The result of reading a file can be either a well-formed data or an error. That is why the \lstinline!Either! type is necessary: to carry either a successful output (which is called Right) or an error (wich is called Left, by convention).
+
+Even though the code on \cref{lst:csv1} achieves its purpose of reading and parsing a CSV file, it is important to improve the expressiveness of the program types. A data type called \lstinline!ComponentData! is built, where it is possible to store a corresponding \lstinline!ComponentType! for each type component the project supports (initially starting with a restricted subset of possible elements: Resistors, Inductors, Capacitors, AC and DC sources; this list will be expanded for more components in the future). The project's goal is to make \lstinline!ComponentData! be the data type that represents each line of the \lstinline!components.csv! file, as suggested in \cref{lst:csv2}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={ComponentData and ComponentType declarations}, captionpos=b, label={lst:csv2}]
+data ComponentData = 
+  ComponentData { 
+    componentType :: ComponentType,
+    nodeK :: Int,
+    nodeM :: Int,
+    magnitude :: Double,
+    param1 :: Double,
+    param2 :: Double,
+    plot :: Int
+     }
+  deriving (Eq, Show)
+
+data ComponentType = Resistor | Capacitor | Inductor | EAC | EDC | Other Text deriving (Eq, Show)
+
+\end{lstlisting}
+
+A more sophisticated version of the code takes into consideration the \lstinline!csv! header, mapping each item to a \lstinline!ComponentData! field. The function \lstinline!parseNamedRecord! from \textit{Cassava} library does the job:
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={parseNamedRecord}, captionpos=b, label={lst:parseNamedRecord}]
+instance FromNamedRecord ComponentData where
+  parseNamedRecord m =
+    ComponentData
+      <$> m .: "Element Type"
+      <*> m .: "Node K"
+      <*> m .: "Node M"
+      <*> m .: "Value"
+      <*> m .: "Source param 1"
+      <*> m .: "Source param 2"
+      <*> m .: "Plot"
+\end{lstlisting}
+
+\textit{Cassava} is a mature Haskell library for parsing and encoding CSV files. With the support of monads (see \cref{hsmonads}), it allows both index and name based conversions from text files to proper Haskell types. It has several other features such as customizable record-conversion instance derivation (with Haskell generics), incremental decoding and encoding API and streaming API for constant-space decoding. The full documentation can be found on \cite{cassava}.
+
+Compare the \cref{lst:parseNamedRecord} with the declared header of the \textit{components.csv}:
+
+\begin{lstlisting}[language=bash, caption={CAV header components file}, captionpos=b]
+Element Type,Node K,Node M,Value,Source param 1,Source param 2,Plot
+\end{lstlisting}
+
+The code at \cref{lst:parseNamedRecord} applies (\lstinline!<*>!) to each element (which receives an alias of \lstinline!m!, executing the role of a temporary variable in an iteration) to the described sequence of header names ("Element Type", then "Node K", then "Node M", etc). Columns with types defined at Haskell's standard library, such as \lstinline!Int! or \lstinline!Double!, are directly converted to the fields of \lstinline!ComponentData!.
+
+It is necessary then to specify how "Element Type" translates to \lstinline!ComponentType!. \lstinline!ComponentType! is not a type defined at Haskell's standard library; it is a proper type. \lstinline!parseField! function must translate the text of an \lstinline!m! to this custom type \lstinline!ComponentType!, as shown in \cref{lst:parseField}:
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={parseField}, captionpos=b, label={lst:parseField}]
+instance FromField ComponentType where
+  parseField "R" =
+    pure Resistor
+
+  parseField "L" =
+    pure Inductor
+
+  parseField "C" =
+    pure Capacitor
+
+  parseField "EDC" =
+    pure EDC
+
+  parseField "EAC" =
+    pure EAC
+
+  parseField otherType =
+    Other <$> parseField otherType
+
+\end{lstlisting}
+
+In this implementation, a \lstinline!ComponentType! supports the RLC components, EAC and EDC (as specified in \cref{haskellgoal}). If any other string is specified, it is flexible enough for preventing the program to crash if the user accidentally inputs a non-existing Component Type (for example, "H"). The algorithm will ignore the text type with \lstinline!Other!. A more strict implementation could throw an error in the presence of a field that cannot be converted with \lstinline!parseField!. It is important to notice that if there are any parsing errors, there will be an error during runtime execution. 
+
+
+Even if some errors can happen during runtime, the application "shields" the code by warning it about problems that can happen. The \lstinline!IO! type deals with impure functions. In the following example, combined with \lstinline!Either!, it throws an exception if something does not work as expected while parsing a \lstinline!csv! file or lets the code move forward if the outcome is appropriated. Using the functional programming style, functions to read and decode a \lstinline!csv! file are composed. The functions \lstinline!decodeItems! and \lstinline!decodeItemsFromFile! summarise these operations. The code in \cref{lst:decode} brings the proper implementations suggested at the official Cassava's guide:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Decoding a CSV file}, captionpos=b, label={lst:decode}]
+decodeItems :: ByteString -> Either String (Vector ComponentData)
+decodeItems =
+  fmap snd . Cassava.decodeByName
+
+decodeItemsFromFile :: FilePath -> IO (Either String (Vector ComponentData))
+decodeItemsFromFile filePath =
+  catchShowIO (ByteString.readFile filePath)
+    >>= return . either Left decodeItems
+
+catchShowIO :: IO a -> IO (Either String a)
+catchShowIO action =
+  fmap Right action
+    `catch` handleIOException
+  where
+    handleIOException :: IOException -> IO (Either String a)
+    handleIOException =
+      return . Left . show
+
+\end{lstlisting}
+
+The type signature of \lstinline!decodeItemsFromFile! shows that it receives a \lstinline!FilePath! and the return of the function may have side effects (not a pure function). This idea is represented with the type \lstinline!IO!. The result will be \lstinline!Either! an error message from an exception (described at \lstinline!catchShowIO!) or a successful \lstinline!Vector! of \lstinline!ComponentData! elements.
+
+To acquire the simulation data from the \lstinline!simulation.csv! file, the exact same process is used. First, the type declaration, shown in \cref{lst:simulationcsv2}:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={SimulationData declaration}, captionpos=b, label={lst:simulationcsv2}]
+data SimulationData = 
+  SimulationData { 
+    nodes :: Int,
+    voltageSources :: Int,
+    stepSize :: Double,
+    tmax :: Double
+     }
+  deriving (Eq, Show)
+\end{lstlisting}
+
+Then, the conversion from text to the data type using the \lstinline!parseNamedRecord! from \lstinline!Cassava! library, listed in the code at \cref{lst:parseNamedRecordsimulation}:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={parseNamedRecord for simulation data}, captionpos=b, label={lst:parseNamedRecordsimulation}]
+instance FromNamedRecord SimulationData where
+  parseNamedRecord m =
+    SimulationData
+      <$> m .: "Number of Nodes"
+      <*> m .: "Number of Voltages Sources"
+      <*> m .: "Step Size"
+      <*> m .: "Maximum time for simulation"
+\end{lstlisting}
+
+\lstinline!SimulationData! only contains basic types form Haskell's standard library (\lstinline!Int! and \lstinline!Double!). Conversions with \lstinline!parseField! are not required.
+
+Lastly, the decoding functions are listed in \cref{lst:decodesimulation}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Decoding the CSV simulation file}, captionpos=b, label={lst:decodesimulation}]
+decodeSimulation :: ByteString -> Either String (Vector SimulationData)
+decodeSimulation =
+  fmap snd . Cassava.decodeByName
+
+decodeSimulationFromFile :: FilePath -> IO (Either String (Vector SimulationData))
+decodeSimulationFromFile filePath =
+  catchShowIO (ByteString.readFile filePath)
+    >>= return . either Left decodeSimulation
+
+\end{lstlisting}
+
+
+In the original ETR-P, the data input happens as listed in the code at \cref{lst:decodesimulationmatlab}:
+
+\begin{lstlisting}[language=Matlab, caption={Shortened version of ETR-P Matlab code to read the input data}, captionpos=b, label={lst:decodesimulationmatlab}]
+FILENAME = input('Enter the input file name *.txt : ', 's');
+FID  = fopen(FILENAME);
+data = textscan(FID, '%s %d %d %f %f %f %f %d %d %d');
+fclose(FID);
+% data contains the input file organized as a table. Now, each column
+% should be put in a separated column vector.
+type = data{1}; from = data{2}; to   = data{3}; val4 = data{4}; val5 = data{5};
+val6 = data{6}; val7 = data{7}; val8 = data{8}; val9 = data{9}; plt  = data{10};
+% bmax is the number of lines in the input file.
+bmax = length(type);
+%% Calculating parameters for vector and matrix dimensioning
+b = 1;
+if strcmp(type(b), 'T')
+    % Reading time card data
+    % N = Number of nodes
+    % M = Number of voltage sources
+    % dt = step size
+    % tmax = maximum time of simulation
+    N = from(b);
+    M = to(b);
+    dt = val4(b);
+    tmax = val5(b);
+    Damp = plt(b);
+    if Damp == 0
+        fprintf('-------------------- THTA Activated --------------------\r');
+    end
+else
+    error('Input file error: the first line is not the Time Card.');
+end
+\end{lstlisting}
+
+There are no explicit types, and the context of what is going on in the code relies mostly on variable names and code comments. \lstinline!if/else! blocks deal with malformed files (for ETR-P, files that do not start with 'T', which is the row holding the simulation's parameters, are considered to be malformed and return an error message to the user). No additional checks are made to see if there are components different from the RLC, transmission lines, voltage sources, current sources or switches. These lines would be ignored.
+
+
+
+\subsection{ Improvements to the data input }
+
+CSV files are convenient and more structured than a pure \lstinline!txt! files. However, other configurations force the user to adopt a more restrictive format, such as \lstinline!XML! or \lstinline!JSON!, reducing the number of problems generated by malformed or illegal input data. \lstinline!JSON! files are widely accepted in modern software applications. Ideally, the \lstinline!components.csv! file could be translated in a JSON file similar to the suggestion in \cref{lst:jsoninputsuggest}:
+
+\begin{lstlisting}[language=bash,, caption={Input file as JSON}, captionpos=b, label={lst:jsoninputsuggest}]
+{
+  "circuit": "A circuit",
+  "time": {
+    
+  },
+  "nv": {
+    
+  },
+  "nodes": [
+    {
+      "from": 1,
+      "to": 1,
+      "element_type": "R",
+      "element_value": 10.5,
+      "power_10": 0,
+    }
+  ]
+  
+}
+\end{lstlisting}
+
+This feature is listed on the project's issue tracker \cite{thtahs}.
+
+\section{ Initial Setup }
+
+After collecting and parsing the required input data for the simulation, it is necessary to work on the initial setup. Several parameters must be determined. They are listed in the following subsections.
+
+\subsubsection {D: number of unknown voltage sources}
+
+The number of unknown voltage sources (D) is given by the formula $ D = N - M $, where $ N $ and $ M $ are the number of nodes in the simulation and the number of voltage sources, respectively. They are both obtained from the \lstinline!SimulationData!. In the Haskell implementation, this process is represented as described in \cref{lst:dcalc}:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Determining the number of unknown voltage sources D}, captionpos=b, label={lst:dcalc}]
+(nodes simulation - voltageSources simulation)
+\end{lstlisting}
+
+There is a similar, straightforward formula at ETR-P.
+
+\subsubsection {gkm: Conductance for each element}
+
+For each type of RLC component, there is a formula to determine its respective conductance. It varies with the \lstinline!ComponentType! and it depends on the simulation's step size. The respective Haskell function will then receive two parameters: the \lstinline!ComponentData! and a Double value representing the simulation step size. It will return another Double value representing the appropriate conductance, as declared in \cref{lst:conductancecalc}.
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Determining the conductance for each element gkm}, captionpos=b, label={lst:conductancecalc}]
+condutance :: ComponentData -> Double -> Double
+condutance component dt =
+  case componentType component of
+    Resistor -> 1.0 / (magnitude component)
+    Capacitor -> (magnitude component) * 0.000001 * 2 / dt
+    Inductor -> dt / (2 * 0.001 * (magnitude component))
+    _ -> 0.0
+\end{lstlisting}
+
+The \lstinline!ComponentType! is identified with a \textbf{Pattern Matching} \lstinline!case!. If the \lstinline!ComponentType! is not a Resistor, Capacitor or Inductor, the conductance is determined as $ 0.0 $. Recall \cref{haskell:fnstr} for a broader explanation of Pattern matching.
+
+From this function, it is possible to determine the conductance vector for all the elements of the simulation. The parsed \lstinline!components.csv! originates a \lstinline!Vector! of \lstinline!ComponentData! elements (when parsed with no errors). This initial Vector can feed the function \cref{lst:vecconductancecalc}:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Determining the conductance vector gkm}, captionpos=b, label={lst:vecconductancecalc}]
+gkm :: Vector ComponentData -> Double -> Vector Double
+gkm components dt =
+  Vector.map (\c -> condutance c dt) components
+\end{lstlisting}
+
+Listing \ref{lst:vecconductancecalc} receives a \lstinline!Vector ComponentData! and a \lstinline!Double! as input values, maps each element of the \lstinline!Vector! with the \lstinline!condutance! function and returns another vector as the final result.
+
+In ETR-P, despite of the several temporary variables, the code for calculating conductances relies on many nested \lstinline!if/else! blocks (see \cref{lst:conductancecalcthta})
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={Calculating conductances in Matlab}, captionpos=b, label={lst:conductancecalcthta}]
+% gkm = conductance for each element in the input file
+gkm = zeros(bmax,1);
+[...]
+% Calculate branch conductances for each input data row
+for b = 2:bmax
+    if strcmp(type(b), 'R') || strcmp(type(b), 'S')
+        R = val4(b);
+        gkm(b) = 1/R;
+    elseif strcmp(type(b), 'L')
+        L = val4(b)*1e-3; %mH
+        gkm(b) = dt/(2*L);
+    elseif strcmp(type(b), 'C')
+        C = val4(b)*1e-6; %uF
+        gkm(b) = 2*C/dt;
+    elseif strcmp(type(b), 'TL')
+        Zc = val4(b);
+        gkm(b) = 1/Zc;
+    end
+end
+\end{lstlisting}
+
+
+\subsubsection {npoints: number of points in the simulation}
+
+Another straightforward value, the number of points in the simulation (\lstinline!npoints!) is given by the formula $ npoints = fix(tmax/dt) + 1 $, where $ tmax $ and $ dt $ are both obtained from the \lstinline!SimulationData! and correspond to the maximum timestamp for the simulation and the step size, respectively. \lstinline!fix! (which is called \lstinline!round! in Haskell) truncates the division to its integer portion.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Determining the number of points in the simulation npoints}, captionpos=b, label={lst:npointscalc}]
+npoints :: SimulationData -> Int
+npoints sim = 
+  round ((tmax sim)/(stepSize sim)) + 1
+\end{lstlisting}
+
+As specified in \cref{lst:npointscalc}, the \lstinline!npoints! function receives the \lstinline!SimulationData! as a single parameter and returns an \lstinline!Int! with the number of points. The function \lstinline!npoints! requires the \lstinline!SimulationData! as an input. That means it requires a successful parsing of the \lstinline!simulation.csv! file. It does not make sense to call this function if there were errors to obtain the simulation parameters. This restriction is encoded in the function's signature. Such a feature is not present in the ETR-P Matlab code.
+
+The code in ETR-P is equally direct and for this reason it is not listed in this section.
+
+\subsubsection {nh: number of energy storage elements}
+
+The number of energy storage elements (\lstinline!nh!) is the number of Inductors and Capacitors in the circuit. In the Haskell implementation, a \lstinline!filter! functor (filter in a Vector) is created to collect only \lstinline!C! or \lstinline!L! \lstinline!ComponentTypes! as presented in \cref{lst:filternh}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={filtering energy storage elements}, captionpos=b, label={lst:filternh}]
+filterEnergyStorageComponent :: Vector ComponentData -> Vector ComponentData
+filterEnergyStorageComponent =
+  Vector.filter (\r -> (componentType r == Capacitor) || (componentType r == Inductor))
+\end{lstlisting}
+
+The function \lstinline!filterEnergyStorageComponent! receives a \lstinline!Vector! of \lstinline!ComponentData! and selects only the ones which \lstinline!ComponentType! are \lstinline!C! or \lstinline!L!. The function \lstinline!nh! (shown in \cref{lst:nhcalc}) receives a \lstinline!Vector CmponentData!, then filters it with \lstinline!filterEnergyStorageComponent! and returns the length of the filtered elements.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Determining the number energy storage elements nh}, captionpos=b, label={lst:nhcalc}]
+nh :: Vector ComponentData -> Int
+nh components =
+  length $ filterEnergyStorageComponent components
+\end{lstlisting}
+
+The Matlab ETR-P version relies on \lstinline!if/else! blocks to determine the value of \lstinline!nh!, as seen in \cref{lst:matlabnhcalc}.
+\begin{lstlisting}[language=Matlab, numbers=left, caption={Determining the number energy storage elements nh with ETR-P}, captionpos=b, label={lst:matlabnhcalc}]
+% nh = number of energy storage elements
+nh = 0;
+[...]
+for b = 2:bmax
+    % Set tstart to zero. If we find any source that was active at t<0,
+    % set the program to compute the Steady State Solution.
+    tstart = 0;
+    if strcmp(type(b), 'L') || strcmp(type(b), 'C')
+        % finding the number of lumped elements which need history terms
+        nh = nh + 1;
+        val8(b) = nh;
+        [...] % Code to deal with Transmission Lines ommited
+\end{lstlisting}
+
+
+\subsubsection {G matrix: Conductances matrix}
+
+The conductances square matrix \lstinline!G! holds the conductances calculated with the support of the \lstinline!gkm! vector. The \lstinline!G! matrix is built using \textbf{Recursion} and with the \lstinline!let/in! Haskell structures (check \cref{lst:gmatrix}).
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building the G Matrix}, captionpos=b, label={lst:gmatrix}]
+buildGMatrixFromList :: SimulationData -> Matrix Double -> [ComponentData] ->  Matrix Double
+buildGMatrixFromList _ buffer [] = buffer
+buildGMatrixFromList simulation buffer (c:cs) =
+  let gkmss = condutance c $ stepSize simulation 
+      bufferUpdtate = gMatrix (nodeK c, nodeM c) buffer gkmss 
+  in buildGMatrixFromList simulation bufferUpdtate cs
+\end{lstlisting}
+
+The function \lstinline!buildGMatrixFromList! receives the \lstinline!SimulationData!, a buffer matrix (which its initial value is set to zero), a list of \lstinline!ComponentData! (\lstinline![ComponentData]!) and returns the \lstinline!G! matrix. It is a recursive function: if the list of \lstinline!ComponentData! is empty, it returns the value held in the buffer. Otherwise, it calculates the conductance of the given element, updates the values of the buffer with the function \lstinline!gMatrix! and holds the value on \lstinline!bufferUpdtate!.
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building the G Matrix buffer update}, captionpos=b, label={lst:gmatrixaux}]
+gMatrix :: (Int, Int) -> Matrix Double -> Double -> Matrix Double
+gMatrix (k, 0) buffer gkmHead = diagonalUpdate k buffer gkmHead
+gMatrix (0, m) buffer gkmHead = diagonalUpdate m buffer gkmHead
+gMatrix (k, m) buffer gkmHead = 
+  let updateK = ((k, k), (Matrix.getElem k k buffer) + gkmHead)
+      updateM = ((m, m), (Matrix.getElem m m buffer) + gkmHead)
+      updated1 = ((k, m), (Matrix.getElem k m buffer) - gkmHead)
+      updated2 = ((m, k), (Matrix.getElem m k buffer) - gkmHead)
+  in
+    gMatrixUpdate [updateK, updateM, updated1, updated2] buffer
+
+gMatrixUpdate :: [((Int, Int), Double)] -> Matrix Double -> Matrix Double
+gMatrixUpdate [] gmatrix = gmatrix
+gMatrixUpdate (((k, m), toUpdate):xs) gmatrix =
+  gMatrixUpdate xs (Matrix.setElem toUpdate (k, m) gmatrix)
+
+diagonalUpdate :: Int -> Matrix Double -> Double -> Matrix Double
+diagonalUpdate d buffer gkmHead =
+  let updated = (Matrix.getElem d d buffer) + gkmHead
+  in Matrix.setElem updated (d, d) buffer
+\end{lstlisting}
+
+In \cref{lst:gmatrixaux}, the auxiliary function \lstinline!gMatrix! receives a Tuple of \lstinline!Int! representing the nodes from the component (\lstinline!nodeK! and \lstinline!nodeM!), the buffer (a \lstinline!Matrix Double!) and the value of the conductance for the element. It patterns matches according to the positions in the tuple (k, m) and calls another auxiliary function, \lstinline!diagonalUpdate! (when \lstinline!k! or \lstinline!m! are zero), or \lstinline!gMatrixUpdate! (when \lstinline!k! and \lstinline!m! have distinct values).
+
+Once again, there isn't a single \lstinline!if/else! block in this function. Everything is determined and calculated with \textbf{Pattern Matching} and \textbf{Recursion}. Every step of the recursive call produces a new matrix. There is no risk of mutability-related issues.
+
+The ETR-P code for creating the G Matrix is described in \cref{lst:thtagmatrix}.
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={G Matrix with ETR-P}, captionpos=b, label={lst:thtagmatrix}]
+%% Build and partition the G matrix
+% Calculate branch conductances for each input data row
+for b = 2:bmax
+    if strcmp(type(b), 'R') || strcmp(type(b), 'S')
+        R = val4(b);
+        gkm(b) = 1/R;
+    elseif strcmp(type(b), 'L')
+        L = val4(b)*1e-3; %mH
+        gkm(b) = dt/(2*L);
+    elseif strcmp(type(b), 'C')
+        C = val4(b)*1e-6; %uF
+        gkm(b) = 2*C/dt;
+    end
+end
+
+% Build the G matrix
+for b = 2:bmax
+    k = from(b);
+    m = to(b);
+    if m == 0
+        G(k,k) = G(k,k) + gkm(b);
+    elseif k == 0
+        G(m,m) = G(m,m) + gkm(b);
+    else
+        G(k,k) = G(k,k) + gkm(b);
+        G(m,m) = G(m,m) + gkm(b);
+        if strcmp(type(b), 'TL') == 0
+            % If the branch is NOT a transmission line then calculate
+            % off-diagonals
+            G(k,m) = G(k,m) - gkm(b);
+            G(m,k) = G(m,k) - gkm(b);
+        end
+    end
+end
+\end{lstlisting}
+
+\subsection{ Refactoring example - GMatrix}
+
+The \cref{lst:gmatrix} and its auxiliary functions can be shorter and deserve a refactor. They can be rewritten to be more compact. This enhancement is listed on \cite{thtahs} and this section implements the desired improvement.
+
+The code on \cref{lst:gmatrix} and on \cref{lst:gmatrixaux} is functional, but verbose. This was the first version of the Haskell implementation and this subsection can be a good place to show the process of refactoring functional code. After building the auxiliary functions on \cref{lst:gmatrixaux}, it became clear that the \lstinline!GMatrix! could be built only with the conductances (which could be calculated on demand, not necessarily in a \lstinline!let/in! block)and with pattern matching across the nodes K and M. \cref{lst:gmatrixrefac} brings an alternative version for the implementation, more compact and more direct. In this code, the function \lstinline!buildGMatrixFromList! is replaced by \lstinline!buildGMatrixFromVector! (for making the function call simpler), and all the auxiliary functions (\lstinline!diagonalUpdate!, \lstinline!gMatrixUpdate! and \lstinline!gMatrix!) are replaced by a single function, \lstinline!buildCompactGMatrix!, that receives the step size of the simulation (\lstinline!dt!), the list of components and a buffer for the \lstinline!GMatrix!, initially set to zero.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building the G Matrix buffer update}, captionpos=b, label={lst:gmatrixrefac}]
+buildGMatrixFromVector :: SimulationData -> Vector ComponentData -> Matrix Double
+buildGMatrixFromVector simulation components =
+  buildCompactGMatrix (stepSize simulation) (Vector.toList components) (Matrix.zero (nodes simulation) (nodes simulation))
+
+
+buildCompactGMatrix :: Double -> [ComponentData] -> Matrix Double -> Matrix Double
+buildCompactGMatrix dt [] buffer = buffer
+buildCompactGMatrix dt (component:cs) buffer =
+  case (nodeK component, nodeM component) of 
+        (0, m) -> buildCompactGMatrix dt cs (Matrix.setElem (Matrix.getElem m m buffer + condutance component dt) (m, m) buffer)
+        (k, 0) -> buildCompactGMatrix dt cs (Matrix.setElem (Matrix.getElem k k buffer + condutance component dt) (k, k) buffer)
+        (k, m) -> buildCompactGMatrix dt cs (Matrix.setElem (Matrix.getElem k k buffer + condutance component dt) (k, k) (Matrix.setElem (Matrix.getElem m m buffer + condutance component dt) (m, m) (Matrix.setElem (Matrix.getElem k m buffer - condutance component dt) (k, m) (Matrix.setElem (Matrix.getElem m k buffer - condutance component dt) (m, k) buffer))))
+        (_, _) -> buildCompactGMatrix dt cs buffer
+
+
+\end{lstlisting}
+
+In \cref{lst:gmatrixrefac}, for the case where the GMatrix needs to be updated outside the diagonal (which requires multiple changes), recursion is used in the \lstinline!buffer!, producing the effect of multiple sequential updates to each index of the matrix.
+
+
+\section{ Simulation Loop }
+
+With the initial setup completed, the next step is the simulation loop. In terms of functional programming, building this step was one of the most challenging parts of this work. A functional approach for the simulation loop had to be built on top of Recursion and Pattern matching - that means identifying the parameters changing in every iteration under the matrix form of the algorithm. The imperative implementation of ETR-P does not make it clear which parameters belong to the main body of the algorithm on every step of the iteration and which information is just a tool to guarantee the procedural process (for example, the indexes of vectors and matrices).
+
+The first step to build this recursive simulation was identifying what are the fixed parameters, as well as what are the ones that change on every step of the iteration. These discoveries are specified in the function's signatures transcribed in \cref{lst:simulloopparam}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building the simulation loop - parameter identification}, captionpos=b, label={lst:simulloopparam}]
+thtaSimulationStep :: [ComponentData] -> Matrix Double -> SimulationData -> Int -> Int -> Double  -> Vector Double -> Matrix Double -> Vector Double -> Vector Double -> SimulationResults
+thtaSimulationStep components condutances simulation thtactl n time ih vMatrix vbVector iVector =
+ -- implementation
+\end{lstlisting}
+
+Every step of the simulation requires the list of \lstinline!ComponentData!, the \lstinline!Matrix! of conductances, the \lstinline!SimulationData!, the \lstinline!THTACtl! (the core of the THTA algorithm in ETR-P),  the simulation step \lstinline!n!, the time stamp \lstinline!time! (required for determining \lstinline!EAC! values), the historical vector \lstinline!Ih!, the matrix of Voltages \lstinline!V!, the vector with voltage sources \lstinline!VB! and the vector of current \lstinline!I!. The \lstinline!conductance! of the components is also necessary, but it can be calculated in every step (it is a pure function, which means it will certainly have the same value for the same inputs). This extensive list of parameters produces some intermediate values in every step - they are listed in the \lstinline!thtaSimulationStep! implementation in \cref{lst:simulloopimpl}.
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building the simulation loop - let bindings}, captionpos=b, label={lst:simulloopimpl}]
+thtaSimulationStep :: [ComponentData] -> Matrix Double -> SimulationData -> Int -> Int -> Double  -> Vector Double -> Matrix Double -> Vector Double -> Vector Double -> SimulationResults
+thtaSimulationStep _ _ _ _ 1 _ _ vMatrix _ iVector = (iVector, vMatrix)
+thtaSimulationStep components condutances simulation thtactl n time ih vMatrix vbVector iVector =
+  let (gaa, gab, gba, gbb) = Matrix.splitBlocks ((nodes simulation) - (voltageSources simulation)) ((nodes simulation) - (voltageSources simulation)) condutances
+      ihBuffer = buildIhVector (nhComponents components) (stepSize simulation) n (Vector.toList ih) [] vMatrix
+      (thta, ihThta, timeThta) = thtaControl thtactl time ihBuffer ih simulation
+      vbVec = buildVBVector components timeThta []
+      iVec = buildIVector (nhComponents components) (Vector.toList ihThta) (Vector.replicate (nodes simulation) 0)
+      (iVecCalc, vVec) = solver (toHMatrixVectorTransformer iVec) (toHMatrixTransformer gaa) (toHMatrixTransformer gab) (toHMatrixTransformer gba) (toHMatrixTransformer gbb) (toHMatrixVectorTransformer vbVec) simulation
+      vMatr = Matrix.mapCol (\r _ -> vVec Vector.! (r - 1)) (n-1) vMatrix
+  in
+      thtaSimulationStep components condutances simulation thta (n-1) timeThta ihThta vMatr vbVec iVecCalc
+\end{lstlisting}
+
+First, the Tuple \lstinline!(gaa, gab, gba, gbb)!  originates from the \lstinline!Matrix.split! function, after splitting the matrix of conductances \lstinline!G! in four sub-matrices. In the model, they are equivalent to the GAA, GAB, GBA and GBB submatrices of the linear system. Next, it is necessary to calculate the current historical values and store the results in \lstinline!ihBuffer!. It demands a call to an auxiliary function \lstinline!buildIhVector!. \lstinline!vbVec! is the \lstinline!VB! Vector for that step. The \lstinline!thataControl! function returns a Tuple with the THTA Control and the updated value of the current historic vector, as well as the time step. Next,  the values of \lstinline!iVec! are calculated. \lstinline!iVec! is  the vector of current values, based on the \lstinline!Ih! (historic current) vector previously calculated. All these intermediate values are passed to the \lstinline!solver! function, which returns a Tuple with a final value for the \lstinline!I Vector! and the updated columns of the \lstinline!V! Matrix. The following binding, \lstinline!vMatr!, updates the \lstinline!V! Matrix. Finally, the next step of the recursion is invoked with the newly calculated values. 
+
+There is a pattern matching at the beginning of the function \lstinline!thtaSimulationStep! that forces the stop of the recursive calls if the simulation step is equals to 1. So in the functional approach, the initial step starts the simulation within the largest step \lstinline!n! and decreases it's value in each step of the iteration. Going from \lstinline!npoints! to 1 is the same as going from 1 to \lstinline!npoints!. The \lstinline!V! Vector will be built from right to left.
+
+The original implementation of ETR-P in Matlab does not aggregate these steps in a single location. It is reasonable, instead, to compare the auxiliary functions \lstinline!buildIhVector!, \lstinline!buildVBVector!, \lstinline!thtaControl!, \lstinline!buildIVector! and \lstinline!solver! with the original implementation.
+
+\subsubsection{ buildIhVector: creating a buffer for the historic current values }
+
+The \lstinline!buildIhVector! function takes the list of components (already filtered for L and C only), the step size parameter (obtained from \lstinline!SimulationData! ), the iteration step, the buffer of the \lstinline!Ih! Vector (if any), an empty buffer vector (\lstinline!ihnew!) and the \lstinline!V! Matrix, returning an updated \lstinline!Ih! vector buffer. Its values are updated bases on the nodes \lstinline!K! and \lstinline!M! and also on the \lstinline!ComponentType!. That is why there is an extensive pattern matching against the Tuple made of these three pieces of information.  The values of the conductances are also necessary and are calculated when needed, as shown \cref{lst:buildIhVector}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building the Ih buffer vector: buildIhVector}, captionpos=b, label={lst:buildIhVector}]
+buildIhVector :: [ComponentData] -> Double -> Int -> [Double] -> [Double] -> Matrix Double -> Vector Double
+buildIhVector [] _ _ _ ihnew _ = Vector.fromList ihnew
+buildIhVector (component:cs) dt n (hold:ihold) ihnew vMatrix =
+  case (componentType component, nodeK component, nodeM component) of 
+      (Inductor, 0, m) -> buildIhVector cs dt n ihold (ihnew ++ [(2*(condutance component dt)*(Matrix.getElem m n vMatrix) + hold)]) vMatrix
+      (Inductor, k, 0) -> buildIhVector cs dt n ihold (ihnew ++ [(-2*(condutance component dt)*(Matrix.getElem k n vMatrix) + hold)]) vMatrix
+      (Inductor, k, m) -> buildIhVector cs dt n ihold (ihnew ++ [(-2*(condutance component dt)*((Matrix.getElem k n vMatrix) - (Matrix.getElem m n vMatrix)) + hold)]) vMatrix
+      (Capacitor, 0, m) -> buildIhVector cs dt n ihold (ihnew ++ [(-2*(condutance component dt)*(Matrix.getElem m n vMatrix) - hold)]) vMatrix
+      (Capacitor, k, 0) -> buildIhVector cs dt n ihold (ihnew ++ [(2*(condutance component dt)*(Matrix.getElem k n vMatrix) - hold)]) vMatrix
+      (Capacitor, k, m) -> buildIhVector cs dt n ihold (ihnew ++ [(2*(condutance component dt)*((Matrix.getElem k n vMatrix) - (Matrix.getElem m n vMatrix)) - hold)]) vMatrix
+      (_, _, _) -> buildIhVector cs dt n ihold ihnew vMatrix
+\end{lstlisting}
+
+
+Compare the \cref{lst:buildIhVector} with the Matlab ETR-P implementation at \cref{lst:buildIhVectormatlab}.
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={Ih vector buffer in Matlab ETR-P}, captionpos=b, label={lst:buildIhVectormatlab}]
+
+%% Calculate the history sources at time t
+    % to be used in t+dt for R,L,C elements and in t+Tau for TL
+    Ihold = Ih;
+    Ihnew = zeros(nh,1);
+    for b = 2:bmax
+        k = from(b);
+        m = to(b);
+        idxhist = val8(b);
+        idxplt = val9(b);
+        if strcmp(type(b), 'L')
+            if k == 0
+                Ihnew(idxhist) = 2 * gkm(b) * V(m,n) + Ihold(idxhist);
+            elseif m == 0
+                Ihnew(idxhist) = -2 * gkm(b) * V(k,n) + Ihold(idxhist);
+            else
+                Ihnew(idxhist) = -2 * gkm(b) * (V(k,n)-V(m,n)) + Ihold(idxhist);
+            end
+        elseif strcmp(type(b), 'C')
+            if k == 0
+                Ihnew(idxhist) = -2 * gkm(b) * V(m,n) - Ihold(idxhist);
+            elseif m == 0
+                Ihnew(idxhist) = 2 * gkm(b) * V(k,n) - Ihold(idxhist);
+            else
+                Ihnew(idxhist) = 2 * gkm(b) * (V(k,n)-V(m,n)) - Ihold(idxhist);
+            end
+
+            % Code for Transmission lines ommited.
+        end
+    end
+
+\end{lstlisting}
+
+
+\subsubsection{ buildVBVector: creating the vector with sources values }
+
+The code for the \lstinline!VB! Vector is pretty straightforward, as seen in \cref{lst:buildVBVector}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Creating the vector with sources values: buildVBVector}, captionpos=b, label={lst:buildVBVector}]
+buildVBVector :: [ComponentData] -> Double -> [Double] -> Vector Double
+buildVBVector [] _ buffer = Vector.fromList buffer
+buildVBVector (c:components) time buffer =
+  case (componentType c) of EDC -> buildVBVector components time ((magnitude c) : buffer)
+                            EAC -> buildVBVector components time (((magnitude c * cos (2 * pi * param2 c * time + (param1 c * (pi/180))))) : buffer)
+                            _   -> buildVBVector components time buffer
+\end{lstlisting}
+
+\lstinline!buildVBVector! receives the list of components, the current time and a temporary buffer with the vector values to be returned after the recursion. It filters the sources (\lstinline!EAC! and \lstinline!EDC! ) and calculates the voltage vectors accordingly. Triangular sources are not supported yet.
+
+Compare the \cref{lst:buildVBVector} with the Matlab ETR-P implementation in \cref{lst:buildIhVectormatlab}:
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={VB vector buffer in Matlab ETR-P}, captionpos=b, label={lst:buildIhVectormatlab}]
+%% Build the VB vector for the time t
+    x = 1;
+    for b = 2:bmax
+        k = from(b);
+        m = to(b);
+        if strcmp(type(b), 'EDC')
+            % DC Voltage Source
+            VB(x,1)= val4(b);
+            x = x+1;
+        elseif strcmp(type(b), 'EAC')
+            % AC Voltage Source
+            VB(x,1)= val4(b)*cos(2*pi*val6(b)*time + val5(b)*(pi/180) );
+            x = x+1;
+        end
+        % Omitting Triangular sources; not implemented in the Haskell Version
+\end{lstlisting}
+
+
+\subsubsection{ thataControl: The core of the THTA Algorithm }
+
+The next auxiliary function is \lstinline!thtaControl! in the \cref{lst:thtaControl}, which implements the "Trapezoidal History Term Averaging" \cite{thta2015bonatto} (THTA) method. 
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Trapezoidal History Term Averaging ETR-P}, captionpos=b, label={lst:thtaControl}]
+thtaControl :: Int -> Double -> Vector Double -> Vector Double -> SimulationData -> (Int, Vector Double, Double)
+thtaControl thtactl time ihnew ih simulation
+  | thtactl <= 0 = (thtactl, ihnew, (stepSize simulation + time))
+  | thtactl < 3 = (thtactl + 1, (Vector.map (\i -> i/2) $ Vector.zipWith (+) ih ihnew), (time + (stepSize simulation/2)))
+  | otherwise = (0, ihnew, (stepSize simulation + time))
+\end{lstlisting}
+
+The function \lstinline!thtaControl! receives the previous \lstinline!thtaCtl! value (which is an integer argument that determines the next timestamp), the current timestamp (a Double), the calculated \lstinline!ihnew! values, the \lstinline!Ih! that should be updated and finally, the \lstinline!SimulationData!. It returns the results in a Tuple of three elements: the updated \lstinline!thtaCtl! integer, the updated \lstinline!Ih! (which was called \lstinline!ihnew!)  and finally, the timestamp. This function uses \textbf{Haskell guards} (\lstinline!|!) to compare and pattern match against the \lstinline!thtaCtl! value.
+
+Compare with the original Matlab implementation at \cref{lst:matlabthtactl}.
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={THTA Control in Matlab}, captionpos=b, label={lst:matlabthtactl}]
+%% THTA Control Here!
+    if Damp == 1
+        THTACtl = 0;
+    end
+    if THTACtl > 0
+        if THTACtl == 1
+            fprintf('THTA activated at t   = %2.50f.\n', time);
+        end
+        
+        if THTACtl < 3
+            fprintf('THTA step %d at t      = %2.50f.\n', THTACtl, time);
+            
+            Ih = (Ih + Ihnew)/2;
+            
+            THTACtl = THTACtl + 1;
+            time = time + dt/2;
+        else
+            Ih = Ihnew;
+            
+            THTACtl = 0;
+            time = time + dt;
+        end
+    else
+        Ih = Ihnew;        
+        % Regular operation
+        % Increment the time
+        time = time + dt;
+    end
+\end{lstlisting}
+
+\subsubsection{ buildIVector: Calculating the current values for each iteration step }
+
+After obtaining the updated values for the \lstinline!Ih! with the \lstinline!thtaCtl! function, it is possible to calculate the values for the \lstinline!I! \lstinline!Vector!. The function \lstinline!buildIVector! receives the list of \lstinline!ComponentData! elements (already filtered for L and C only), the \lstinline!Ih! vector and a zero-valued vector for buffering purposes. It returns the calculated \lstinline!I! Vector, based on \textbf{Pattern Matching} a Tuple with the nodes \lstinline!K! and \lstinline!M! of each component, along with its \lstinline!ComponentType!. It is also a recursive function, iterating over all the components of the circuit, as shown in \cref{lst:buildIVector}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Building I Vector: buildIVector}, captionpos=b, label={lst:buildIVector}]
+buildIVector :: [ComponentData] -> [Double] -> Vector Double -> Vector Double
+buildIVector [] _ iVector = iVector
+buildIVector (component:cs) (ihEl:ih) iVector =
+  case (componentType component, nodeK component, nodeM component) of 
+      (Inductor, k, 0) -> buildIVector cs ih (iVector Vector.// [((k - 1), ((iVector Vector.! (k-1)) + ihEl))])
+      (Inductor, 0, m) -> buildIVector cs ih (iVector Vector.// [((m - 1), ((iVector Vector.! (m-1)) - ihEl))])
+      (Inductor, k, m) -> buildIVector cs ih (iVector Vector.// [((m - 1), ((iVector Vector.! (m-1)) - ihEl)), ((k-1), ((iVector Vector.! (k-1)) + ihEl))])
+      (Capacitor, k, 0) -> buildIVector cs ih (iVector Vector.// [((k - 1), ((iVector Vector.! (k-1)) + ihEl))])
+      (Capacitor, 0, m) -> buildIVector cs ih (iVector Vector.// [((m - 1), ((iVector Vector.! (m-1)) - ihEl))])
+      (Capacitor, k, m) -> buildIVector cs ih (iVector Vector.// [((m - 1), ((iVector Vector.! (m-1)) - ihEl)), ((k-1), ((iVector Vector.! (k-1)) + ihEl))])
+      (_, _, _) -> buildIVector cs ih iVector
+\end{lstlisting}
+
+
+The original Matlab ETR-P version consists of the code presented at \cref{lst:matlabivec}.
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={Building the I Vector with Matlab ETR-P}, captionpos=b, label={lst:matlabivec}]
+    %% Clear vector I
+    I = zeros(N,1);
+
+    %% Add History Current Sources, evaluated at time t-dt for R,L,C elements
+    % or evaluated at t-Tau for TL, into vector I
+    %
+    for b = 2:bmax
+        k = from(b);
+        m = to(b);
+        % idx = transmission line index for history terms
+        % or the lumped element index for history term
+        idx = val8(b);
+        if strcmp(type(b), 'L') || strcmp(type(b), 'C')
+            if m == 0;
+                I(k)= I(k) + Ih(idx);
+            elseif k == 0;
+                I(m)= I(m) - Ih(idx);
+            else
+                I(k)= I(k) + Ih(idx);
+                I(m)= I(m) - Ih(idx);
+            end
+        end
+    end
+
+\end{lstlisting}
+
+
+ETR-P Matlab version uses several auxiliary indexes (such as \lstinline!idx! at \cref{lst:matlabivec}) to keep track of Vector indexes in order to calculate output values accordingly. The Haskell version uses recursion and pattern matching, not requiring any sort of temporary index to keep track of the operations. 
+
+\subsubsection{ solver: putting the pieces together for I and V }
+
+The last auxiliary function is the \lstinline!solver!, which receives the following arguments: each submatrix of the G Matrix (split into GAA, GAB, GBA and GBB), the \lstinline!I! Vector, the \lstinline!VB! vector and the \lstinline!SimulationData!. It returns a Tuple with the final value of \lstinline!I! and the updated column for the \lstinline!V! Matrix (see \cref{lst:solver}). 
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Calculating the final values for I and V in each iteration step}, captionpos=b, label={lst:solver}]
+
+solver :: HMatrix.Vector Double -> HMatrix.Matrix Double -> HMatrix.Matrix Double -> HMatrix.Matrix Double -> HMatrix.Matrix Double -> HMatrix.Vector Double -> SimulationData -> (Vector Double, Vector Double)
+solver iVector gaa gab gba gbb vb simulation =
+  let ia = HMatrix.subVector 0 ((nodes simulation) - (voltageSources simulation)) iVector
+      rhsa = ia - (gab HMatrix.#> vb)
+      va = gaa HMatrix.<\> rhsa
+      ib = (gba HMatrix.#> va) + (gbb HMatrix.#> vb)
+      iVec = HMatrix.vjoin [ia, ib]      
+      vVec = HMatrix.vjoin [va, vb]
+  in
+    ((fromHMatrixVectorTransformer iVec), (fromHMatrixVectorTransformer vVec))
+\end{lstlisting}
+
+To determine the \lstinline!VA! value, there is a requirement to solve a Linear System Equations \lstinline!GAA\RHSA!. It would have been possible to solve it manually using Linear Algebra. However, it was easier to use the tools provided by the library \textbf{HMatrix}. In order to use the HMatrix, it was necessary to convert the \lstinline!Matrix! type from the default package to a \lstinline!HMatrix! Matrix (same situation for \lstinline!Vector!). They are declared as different types: in Object Oriented Languages, such as C++ or Python, that would be similar to having two different \lstinline!Matrix! classes (coming from different packages or modules). The type signature of the \lstinline!solver! function requires a \lstinline!HMatrix! Matrix and it returns a Tuple of Standard Vectors. For converting these types back and forth, four auxiliary functions were created. They are described at \cref{lst:auxhmatrix}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Converting between Matrices and Vectors - HMatrix and standard types}, captionpos=b, label={lst:auxhmatrix}]
+fromHMatrixTransformer :: HMatrix.Matrix Double -> Matrix Double
+fromHMatrixTransformer matrix =
+  Matrix.fromLists $ HMatrix.toLists matrix
+
+toHMatrixTransformer :: Matrix Double -> HMatrix.Matrix Double
+toHMatrixTransformer matrix =
+  HMatrix.fromLists $ Matrix.toLists matrix
+
+fromHMatrixVectorTransformer :: HMatrix.Vector Double -> Vector Double
+fromHMatrixVectorTransformer vec =
+  Vector.fromList $ HMatrix.toList vec
+
+toHMatrixVectorTransformer :: Vector Double -> HMatrix.Vector Double
+toHMatrixVectorTransformer vec =
+  HMatrix.fromList $ Vector.toList vec
+\end{lstlisting}
+
+Inside the function \lstinline!solver!, all the operations are based on the \lstinline!HMatrix! library. It would have been possible to use a single type of Matrix/Vector; for example the ones from the \lstinline!HMatrix! library. However, this is a tool that focuses on advanced linear operations which are not required for most parts of the ETR-P Haskell algorithm. The principle of "Less is More" is one baseline of this work, and over-engineering is avoided in order to keep the results as concise and straightforward as possible.
+
+
+The matrix type comes from the library \lstinline!Data.Matrix! \cite{datamatrix}. It enforces the functional programming behaviour, so it is not possible to mutate an existing Matrix. The matrix type on \lstinline!HMatrix! \cite{hmatrix}, on the other hand, allows the user to apply a more imperative approach by implementing mutable structures.  
+
+Since the \lstinline!solver! function returns the updated column for the \lstinline!V! Matrix, it is necessary to update the matrix itself with the values. Back to the \lstinline!thtaSimulationStep! function, the binding \lstinline!vMatr = Matrix.mapCol (\r _ -> vVec Vector.  (r - 1)) (n-1) vMatrix! updates the previous column of the \lstinline!V! Matrix, making it ready for the next step of the iteration.
+
+Compare the \lstinline!solver! function with the equivalent operations in ETR-P in \cref{lst:matlabfinaliv}.
+
+\begin{lstlisting}[language=Matlab, numbers=left, caption={Calculating the final values for I and V in Matlab ETR-P}, captionpos=b, label={lst:matlabfinaliv}]
+    %% Build vector IA for the time t
+    IA = I(1:D, 1);
+    
+    %% Build the vector RHSA for the time t
+    RHSA = IA - GAB*VB;
+    
+    %% Solve for vector VA at the time t
+    VA = GAA\RHSA;
+    IB = GBA*VA+GBB*VB;
+    I = [IA; IB];
+    %% Build vector V at the time t (i.e.,  time counter or point n)
+    V(:, n) = [VA; VB];
+
+\end{lstlisting}
+
+\subsection{ Improvements to the simulation loop }
+
+There is a lot of space for code refactoring in the scope of the simulation loop functions. Some enhancements are listed below, and their corresponding issues are already tracked on Github:
+
+\begin{itemize}
+  \item Some functions could be treated as internal (or Lambda) functions. They wouldn't need to be declared as a separate function. This work made all the functions to be external functions in order to discuss their signatures and make the algorithm more explicit in terms of types. It is not possible to explicit the function declaration when creating internal functions. It would invalidate several discussions on this chapter.
+  \item Some functions have a long parameter list. It would be possible to rewrite their calls as partial applications.
+  \item Implementing support for external current sources (IAC, IDC) is a desired feature.
+  \item Implementing support for Triangular voltage sources (ETR) and Triangular current sources (ITR) is another desired feature.
+  \item Implementing support for Switches is another upgrade to be developed.
+  \item Supporting for Transmission Lines is a desired functionality.
+  \item Plotting Charts for Current and Voltage information is another feature.
+\end{itemize}
+
+\section{ Running the code }
+
+Now that the previous section presented an overview of the main functions of the program, the basic project settings are explained and detailed. This Haskell project is built with \textbf{Stack} \cite{stack} - it creates a simple way to compile and run the main code together with its dependencies - and \textbf{Cabal} \cite{cabal}, a tool to easily manage external libraries as project dependencies. Since this is a short program, all the content was kept in a single file in a single module. The \lstinline!Main.hs! file has a \lstinline!main! function, which is called when the command \lstinline!stack run! is invoked in the project's directory. Detailed build information can be found at the project's \textit{README.md} instruction file \cite{thtahs}. 
+
+In the \lstinline!main! function, the functions to parse the \lstinline!csv! files are invoked, creating the initial setup and moving into the simulation loop (shown on \cref{lst:mainfn}).
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Main function}, captionpos=b, label={lst:mainfn}]
+main :: IO ()
+main = do
+  eitherSimulation <-
+      fmap getSingleSimulationLine
+        <$> decodeSimulationFromFile "data/simulation.csv"
+
+  case eitherSimulation of
+    Left reason ->
+      Exit.die reason
+
+    Right simulation -> do
+      components_list <- decodeItemsFromFile "data/components.csv"
+      case components_list of
+        Left reason -> Exit.die reason
+        Right components -> do
+          let results = thtaSimulation components simulation
+          putStr "Simulation: \n"
+          print (results)
+\end{lstlisting}
+
+
+In the code on \cref{lst:mainfn}, the initial \lstinline!Either! structure holds the result of a successful parsing of the simulation file or a failure which throws an error and exits the program. If the parsing operation was successful (\lstinline!Right simulation!), the same process is repeated for the components file. In case of another successful parsing, then the simulation is invoked with \lstinline!thtaSimulation!. It is necessary to provide the two parameters this function requires: the parsed \lstinline!ComponentData! \lstinline!Vector! and the \lstinline!SimulationData!.
+
+An improvement that can be implemented is transforming the file names into parameters of the \lstinline!main! function call. See \cite{thtahs}. This single file could also be split into smaller files. The logic for the nodal analysis could be encapsulated in a module. This is not the goal of this project, but it is interesting to acknowledge the importance of modularity.
+
+The complete code of the Haskell ETR-P is listed on the Appendix \ref{apdx:code}.
+
+The Matlab ETR-P version does not hold these operations in an isolated function. It completes the simulation by procedurally by parsing the input files and running for loops.
+
+\subsection{ Open Source implementation on Github }
+
+As a final remark for this chapter, it is important to emphasize that all the code is open source. It is hosted on Github at \url{https://github.com/hannelita/thtahs}. A broader analysis of the benefits of open source projects is beyond the scope of this work. However, it is possible to list a few key points: benefits for learning and e-learning \cite{koohang2005open}, quick feedback from end-users \cite{watson2008business}, distributed management \cite{lerner2001open} and the advantage of easily sharing source code.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

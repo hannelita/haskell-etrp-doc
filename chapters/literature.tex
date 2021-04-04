@@ -1,0 +1,230 @@
+\chapter{ Functional Programming }
+\label{fp}
+
+Functional programming is not an entirely new concept. The nomenclature was solidified in the 1970's by J. Backus \cite{backus1978can}. In his work \cite{hughes1989functional} (published in 1990), J. Hughes summarizes the main benefits of this style by comparing pieces of code in Miranda (a functional language) with structural code. The present work will follow a similar approach. The upcoming sections will introduce and compare the main tools of functional programming. In order to fully understand the ideas, it is necessary to put aside the previous knowledge of the imperative style.
+
+\blockquote[\cite{hughes1989functional}]{
+Functional programming is so-called because its fundamental operation is
+the application of functions to arguments. A main program itself is written as
+a function that receives the program's input as its argument and delivers the
+program's output as its result. Typically the main function is defined in terms of
+other functions
+} 
+
+In other words, "the primary role of the programmer is to construct a function to solve a given problem" \cite{birdwadler} and "the primary role of the computer is to act as an evaluator or calculator".
+
+
+There are many other languages labelled as \textit{functional} languages. Besides Haskell and Miranda, it is possible to mention SML, Hope and, more recently, Scala and Clojure. There are also languages which are popular among the imperative style, but also support some aspects of functional programming. This is the case of Javascript and Python. 
+
+Some functional languages are considered to be "pure": "A language is purely functional if (i) it includes every simply typed $\lambda$-calculus term, and (ii) its call-by-name, call-by-need, and call-by-value implementations are equivalent (modulo divergence and errors)"\cite{sabry1998}. Nevertheless, this definition is not strict. In the group of "purely functional languages", it is possible to cite Haskell and SML.
+
+Even if the definition of "purely function" is not well established, some other topics are well-agreed among the academic community when it comes to characteristics of the functional programming paradigm. They will be listed in the upcoming sections, following the summary proposed by \cite{thompson1991type}.
+
+\section{First class functions}
+Passing functions as arguments to other functions or returning functions as the result of an operation are perfectly valid steps in functional programming. Functions are interpreted with the same connotation of mathematical functions. That means it is conceivable to have several definitions for the same function:
+
+\begin{subequations}
+\begin{equation}
+    f(x) = x + x
+\end{equation}
+\begin{equation}
+    f(x) = 2x
+\end{equation}
+\end{subequations}
+
+Listing \ref{lst:mainfnlit} shows an example of a simple function in a functional language.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={A simple function in a functional language}, captionpos=b, label={lst:mainfnlit}]
+double x = x+x
+\end{lstlisting}
+
+The $ = $ operator is not binding any variable; it is actually performing the same mathematical function one finds when declaring a function. In languages like C++ or Python, it is reasonable to have a code like the following:
+
+\begin{lstlisting}[language=Python, numbers=left, caption={Mutable references}, captionpos=b, label={lst:pythonlit1}]
+a = 1
+a = a + 10
+\end{lstlisting}
+
+The code on \cref{lst:pythonlit1} changes the value of the variable \lstinline!a! from 1 to 11. Such a concept is not allowed in a functional language. The \lstinline!=! operator attaches some value to a variable, and in a functional setting, it becomes immutable. A \textbf{value} is a fully simplified expression. Every time a new binding occurs, a new environment for the bound variables is created. A \textbf{function} corresponds in some sense to the methods in C++ or Python, but it also holds the mathematical foundation mentioned earlier. Analysing the \cref{lst:pythonlit1} under mathematical terms would lead to an inconsistency. 
+
+
+
+It is also feasible to vary the body of the function according to the domain (or, interpreting it as functional programming, the input parameters) \ref{fp:domainim}.
+
+\begin{subequations}\label{fp:domainim}
+\begin{equation}
+    f(x) = x, x \geq 0
+\end{equation}
+\begin{equation}
+    f(x) = -x, x < 0
+\end{equation}
+\end{subequations}
+
+
+It is possible to reproduce the exact same structure in functional programming by using \textbf{pattern matching}. In the main application of this work, for example, it is necessary to calculate an integer value (\lstinline!thtactl!) control for determining the final result of a current vector (in the Haskell ETR-P implementation). Simplifying the process to make the usage of pattern matching more explicit, imagine the following scenario:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Pattern matching with guards. This does not correspond to the original implementation}, captionpos=b, label={lst:letexprsimplified1}]
+thtaControl :: Int -> [Float]
+thtaControl thtactl 
+  | thtactl <= 0 = [0.0, 0.0]
+  | thtactl < 3 = [1.0, 1.0]
+  | otherwise = [2.0, 2.0]
+\end{lstlisting}
+
+The \lstinline![Float]! represents a list of Float numbers. In the code at \cref{lst:letexprsimplified1}, \lstinline!thtactl! is the input argument of the \lstinline!thataControl! function. Depending on its value, the behaviour of the function changes. This structure avoids the confusion of nested \lstinline!if/else! blocks.
+
+\section{Strong type system}
+
+It is possible to organise values in collections called \textbf{types}. There are \textbf{primitive} or \textbf{base} types (boolean, integer, float, double, etc.), and \textbf{compound} or \textbf{derived} types, whose values are build from other types (basic or compound) \cite{birdwadler}. A function is called with arguments and produces a value. When invoking a certain function (think of it as an operation), it is necessary to guarantee the call with the appropriate types of parameters. For example, calling the function \lstinline!add! with characters might not be a valid operation. The languages have mechanisms to check the validity of these types. One way to perform this \textbf{type check} is to have a compiler that captures mismatched data.
+
+No runtime errors arise from type mismatches. This behaviour originates the label 'strong': "the domain and codomain of each function is either stated in or inferable from the program text, and there is a syntactic discipline which prevents a function from being applied to an inappropriate argument" \cite{turner1995elementary}.
+
+\section{Polymorphic types}
+
+Functions also have a type. For example, the \cref{lst:letexprsimplified1} has type \lstinline!(Int -> [Float])!, because it receives an integer and returns a list of float numbers. In some languages, it would be possible to generalise these types. Both integers and floats are numbers, allowing the programmer to determine that the type of the function could also be \lstinline!(Num -> [Num])!. The study of polymorphic types has several topics, but it is reasonable to think about when it is important to have generalisations. For example, to create a function that measures the \lstinline!length! of a list, it would be possible to consider the type \lstinline!([Int] -> Int)!. But then the function \lstinline!length! would be restricted to lists of \lstinline!Int! only, which is not ideal. It is feasible to generalise the domain of the function \lstinline!length! to a \textbf{Polymorphic type}: \lstinline!([a] -> Int)!.
+
+\section{Algebraic types}
+
+
+When developing a function, it is necessary to think of its return type, the type of its parameters and its body. For example, to build a \lstinline!simulation! function for Haskell ETR-P, the input would be a list of components. For the output, a Vector \lstinline!I! together with a Matrix \lstinline!V! would be the expected:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Haskell ETR-P simulation function}, captionpos=b, label={lst:mainfnlit}]
+thtaSimulation :: [ComponentData] -> (Vector Double, Matrix Double)
+\end{lstlisting}
+
+The \lstinline![]! denotes a list, as mentioned previously. A List can have any length, but all its elements must have the same type - that is why the type declaration consists of \lstinline![ComponentData]!, making it explicit it will be a list of ComponentData. Another structure that requires attention is the \textbf{Tuple} - they support different types in the same structure - for example, \lstinline!(Vector Double, Matrix Double)! holds a Vector and a Matrix.
+
+A function is a value: it will be type-checked and evaluated. Just like in C++ or Python, a function can call itself, being labelled as a \textbf{recursive function}. It must contain a base case (which will indicate when to stop the process) and a recursive case (which will propagate the recursive call). 
+
+Another crucial concept are \lstinline!let! expressions. They allow the creation of local bindings, often required by recursive function calls. See \cref{lst:letexpr1}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={let expression}, captionpos=b, label={lst:letexpr1}]
+diagonalUpdate :: Int -> Matrix Double -> Double -> Matrix Double
+diagonalUpdate d buffer gkmHead =
+  let 
+      updated = (Matrix.getElem d d buffer) + gkmHead
+  in  
+      Matrix.setElem updated (d, d) buffer
+\end{lstlisting}
+
+The \lstinline!let! expression holds the local binding of \lstinline!updated!, which computes an intermediate value to be used at the function call triggered after the \lstinline!in! keyword. \lstinline!updated! cannot be used outside of the \lstinline!let! block.
+
+For most of the applications, the basic types (Integer, Double, Float, Boolean, etc) in the standard library are not enough to express the goals and operations of the program. The same way one can define classes in object oriented programming, it is also possible to define custom types in functional languages. It is reasonable to aggregate several \textbf{fields} in a \textbf{Record} just as in \cref{lst:record1}.
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Record}, captionpos=b, label={lst:record1}]
+{first = "Hanneli", last = "Tavante", course="EE"} 
+\end{lstlisting}
+
+A more structured idea than a record originates a \textbf{Datatype} as seen in \cref{lst:datatype}
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={ComponentData datatype}, captionpos=b, label={lst:datatype}]
+data ComponentData = 
+  ComponentData { 
+    componentType :: ComponentType,
+    nodeK :: Int,
+    nodeM :: Int,
+    magnitude :: Double,
+    param1 :: Double,
+    param2 :: Double,
+    plot :: Int
+     }
+
+data ComponentType = Resistor | Capacitor | Inductor | EAC | EDC
+\end{lstlisting}
+
+The custom \lstinline!ComponentData! carries several fields: componentType (whose type is also a custom type), nodeK, nodeM, magnitude, param1, param2 and plot.
+
+Another example of DataType is the \lstinline!ComponentType!. The constructors do not have any parameters (Resistor, Capacitor, etc). To obtain the component type of a component data, a set of \lstinline!if/else! blocks would be required (when thinking according to the imperative programming style). In a functional setting, there is \textbf{Pattern Matching}. The code in \cref{lst:pmcase11} provides another example of this feature, this time using a \textbf{case} expression:
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Pattern matching example with case}, captionpos=b, label={lst:pmcase11}]
+condutance :: ComponentData -> Double -> Double
+condutance component dt =
+  case componentType component of
+    Resistor -> 1.0 / (magnitude component)
+    Capacitor -> (magnitude component) * 0.000001 * 2 / dt
+    Inductor -> dt / (2 * 0.001 * (magnitude component))
+    _ -> 0.0
+\end{lstlisting}
+
+It is also possible to work with pattern matching when declaring the function's body as seen in \cref{lst:pmfn}:
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Pattern matching in functions}, captionpos=b, label={lst:pmfn}]
+buildIVector :: [ComponentData] -> Vector Double -> Vector Double -> Vector Double
+buildIVector [] _ iVector = iVector
+buildIVector (component:cs) ih iVector =
+-- recursive case omitted
+\end{lstlisting}
+
+\lstinline!buildIVector! can be pattern matched against its own parameters. Its behaviour changes when it receives an empty list (meaning the end of the recursion) or when it receives a non-empty list, denoted by \lstinline!(component:cs)!. The underscore means the value does not have any influence on that pattern matching format.
+
+
+\section{Modularity}
+
+There are systems of modules which can be attached to projects, making the development of larger systems easier and more organised. For the developed Haskell ETR-P, for example, a few modules were required to build the project as shown in \cref{lst:moduleshs}.
+
+
+\begin{lstlisting}[language=Haskell, numbers=left, caption={Modules}, captionpos=b, label={lst:moduleshs}]
+-- vector
+import Data.Vector (Vector)
+import qualified Data.Vector as Vector
+
+-- Matrix
+import Data.Matrix (Matrix)
+import qualified Data.Matrix as Matrix
+
+-- HMatrix
+import qualified Numeric.LinearAlgebra.Data as HMatrix
+import qualified Numeric.LinearAlgebra.HMatrix as HMatrix
+
+-- bytestring
+import Data.ByteString.Lazy (ByteString)
+import qualified Data.ByteString.Lazy as ByteString
+\end{lstlisting}
+
+In \cref{lst:moduleshs}, it is possible to find the Vector, Matrix, HMatrix and ByteString modules. It is plausible to import them to the main project assigning an alias. For example, \lstinline!import qualified Data.Matrix as Matrix! adds the alias \lstinline!Matrix! to the module \lstinline!Data.Matrix!.
+
+\section{Fucntional Programming - summary}
+
+"Functional programming can be contrasted with imperative programming either in a negative or a positive sense"\cite{harrison1997introduction}. Combining the "pros" and "cons" listed at \cite{harrison1997introduction} and at \cite{michaelson2011introduction}, it was possible to built the table \ref{tab:funcvsimperative}, which aims to be impartial and summarise an objective and concise comparison of the main differences between these two paradigms:
+
+% Please add the following required packages to your document preamble:
+% \usepackage{graphicx}
+% \usepackage[table,xcdraw]{xcolor}
+% If you use beamer only pass "xcolor=table" option, i.e. \documentclass[xcolor=table]{beamer}
+\begin{table}[H]
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{c
+>{\columncolor[HTML]{FFCE93}}l 
+>{\columncolor[HTML]{DAE8FC}}l }
+\multicolumn{1}{l}{}                                                   & \multicolumn{1}{c}{\cellcolor[HTML]{FFCE93}\textbf{Imperative Paradigm}}                                                                       & \multicolumn{1}{c}{\cellcolor[HTML]{DAE8FC}\textbf{Functional Paradigm}}                                                                            \\ \hline
+\multicolumn{1}{|c|}{\cellcolor[HTML]{EFEFEF}\textbf{Main component}}  & \multicolumn{1}{l|}{\cellcolor[HTML]{FFCE93}Statements}                                                                                        & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}\begin{tabular}[c]{@{}l@{}}Functions \\ (can be treated as values)\end{tabular}}                        \\ \hline
+\multicolumn{1}{|c|}{\cellcolor[HTML]{EFEFEF}\textbf{Assignments}}     & \multicolumn{1}{l|}{\cellcolor[HTML]{FFCE93}\begin{tabular}[c]{@{}l@{}}The same name \\ may be associated with \\ the same value\end{tabular}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}\begin{tabular}[c]{@{}l@{}}No assignments. \\ A name is only \\ associated with one value\end{tabular}} \\ \hline
+\multicolumn{1}{|c|}{\cellcolor[HTML]{EFEFEF}\textbf{Execution order}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFCE93}Crucial importance}                                                                                & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}Not very important}                                                                                     \\ \hline
+\multicolumn{1}{|c|}{\cellcolor[HTML]{EFEFEF}\textbf{Mutability}}      & \multicolumn{1}{l|}{\cellcolor[HTML]{FFCE93}\begin{tabular}[c]{@{}l@{}}Yes, most of the time the \\ structures are mutable\end{tabular}}       & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}Usually not present}                                                                                    \\ \hline
+\multicolumn{1}{|c|}{\cellcolor[HTML]{EFEFEF}\textbf{State changes}}   & \multicolumn{1}{l|}{\cellcolor[HTML]{FFCE93}Essential building block}                                                                          & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}No state}                                                                                               \\ \hline
+\multicolumn{1}{|c|}{\cellcolor[HTML]{EFEFEF}\textbf{Flow control}}    & \multicolumn{1}{l|}{\cellcolor[HTML]{FFCE93}\begin{tabular}[c]{@{}l@{}}Loops, if/else, \\ exceptions\end{tabular}}                             & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}\begin{tabular}[c]{@{}l@{}}Recursion, \\ pattern matching, \\ IO\end{tabular}}                          \\ \hline
+\end{tabular}%
+}
+\caption{Comparison: Imperative and Functional paradigms}
+\label{tab:funcvsimperative}
+\end{table}
+
+
+% \section{Other concepts}
+% [TODO]
+% Recursion and induction
+% recursive types
+
+
+
+
+
+
+
+
+
+
+
+
+

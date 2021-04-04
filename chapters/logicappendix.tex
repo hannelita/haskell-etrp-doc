@@ -1,0 +1,39 @@
+\chapter{Logic and Mathematics}
+\label{sec:logic}
+
+In order to analyse the functional code as a mathematical object, it is important to think about an appropriate Logic. In classical mathematics, \textbf{Propositional Logic} uses connectives (and, or, not, etc) to validate tautologies through proofs (or derivations). A complete guide to all propositional logic domain (such as signed formulas, construction of tableaux, logical consequence analysis, axioms, correctness, completeness and compactness) can be found at \cite{smullyan2014beginner}. This type of logic is limited to a proposition and connectives, which (for a well formed formula) will be either true or false.
+
+\textbf{Predicate Logic}, or First Order Logic, adds two important components to the analysis - the existential quantifiers $ \forall $ and $ \exists $ and the introduction of variables to the predicates (example: $ \exists x Gx $). This type of logic has some similarities with the $\lambda $-Calculus (see \ref{sec:lc}), such as the occurrence of free and bound variables and substitution rules. 
+
+Are there any other types of logic which would be more suitable for analysing programs? It is necessary to dig into mathematics to try to answer this question. It might be necessary to take some of the foundations of mathematics into consideration. Frege made a few, unsuccessful attempts to create an 'arithmeticization' of analysis (\cite{george2002philosophies}). For Frege, logic is the study of truth-preserving inferences and concepts are ontological counterparts of predicative expressions. Concepts are functions from objects to truth values. A concepts can be categorized as:
+
+\begin{itemize}
+  \item \textbf{First-level concepts} - Obtained by removing a name from a declarative sentence, originating a \textit{first level predicate}. 
+  \item \textbf{Recognition statements} - since any expression can be part of infinitely many sentences, a recognition statement is a concept acting as a wild-card for this case. 
+  \item \textbf{Equivalence relations} - Frege's logicism aims to build gap-free demonstrations by partitioning the universe in clusters by equinumerosity. This analysis is a recursive characterization of natural numbers (which are clusters themselves). These clusters are equivalence relations.
+\end{itemize}
+
+Frege's model main concern arises of the need of logical objects. How to define these logical objects? Frege creates another concept, the \textbf{extensions}. By proposing that every object has an extension in an axiom, Frege runs into a paradox where some sets would be member of themselves and some wouldn't, creating an inconsistency in his general proposal. This is widely known as \textbf{Russel's paradox}. 
+
+Russel and Withehead investigated this matter and proposed an alternative, the \textit{Ramified Theory of Types}, which does not rely on sets, but on propositional functions. In this theory, all objects are classified into a hierarchy of types. Unfortunately, this approach bans unharmful sets (paradox-free). Most mathematicians prefer to use alternative theories of sets which are free of paradox and do not require the classification of all entities into types. The most popular model following this proposals is the ZFC (Zermelo-Frankel and the Axiom of Choice model). Note that ZFC is only concerned about sets, whereas Russel's main goal is to show how logic can be applied to general statements. ZFC is a formal axiomatic theory: there is a language to write statements. There is no guarantee that ZFC is paradox-free (no proof it is consistent).
+
+These models presented previously somehow rely on the idea of a set. But a set might have issues according to realism. In philosophy, \textit{realism} states that some propositions might be nor true of false: there is no known answer. The \textit{Law of the Excluded Middle} (wither S is true or not-S is true) might not be valid. The "anti-realist" conception of mathematics is called \textbf{constructivism}. \textbf{Intuitionism} is one type of constructivism, which suggests that mathematical reality is not fully fixed. Infinitude is potential. Intuitionism contasts with classical mathematics and logic for not accepting infinites (see \cite{weyl2013levels}), nor requiring a true/false result.
+
+Intuitionistic mathematics has its own rules, and some of the axioms of the classical logic become invalid under the intuitionistic perspective. When analysing programs, this is one type of logic that could be a potential candidate for adoption. In practical terms, the classical mathematician has a fixed mathematical reality and an actual infinite. The intuitionistic determines a potential infinite. Translating these differences to proofs, the intuitionistic model has the advantage of establishing finite proofs (which are fairly desirable when aiming to termination). Intuitionism imposes constraints to the universal quantifier $ \forall $. In intuitionism, the double negation elimination is not valid:
+
+\begin{prooftree}\label{proofintuit}
+  \AxiomC{$\neg \neg X $}
+  \UnaryInfC{$ X $}
+\end{prooftree}
+
+In contrast, there is an intuitionistic version which is valid:
+
+\begin{prooftree}\label{proofintuitvalid}
+  \AxiomC{$X \lor \neg X $}
+  \AxiomC{$\neg \neg X $}
+  \BinaryInfC{$ X $}
+\end{prooftree}
+
+This chapter does not brings the topic of constructive mathematics in detail, but when combined with functional programming, $\lambda$-calculus and logic, it becomes the baseline for Type Theory, quickly described in \ref{sec:proofs}. Using the words of \cite{thompson1991type} to summarise the relevance of this appendix, "the short discussion of constructive mathematics introduced the idea that proofs should have computational content; [...] to achieve this goal, the underlying logic of the system needed to be changed to one in which we only assert the validity of a proposition when we have a proof of the proposition."
+
+
